@@ -6,6 +6,7 @@ config = load_config()
 
 class RoutingPolicy:
 
+
     def __init__(self):
         self.models = config["models"]
 
@@ -24,6 +25,23 @@ class RoutingPolicy:
             return "low"
 
         return "low"
+
+
+    def enforce_budget(self, tier: str, status: str) -> str:
+
+        if status == "ok":
+            return tier
+
+        if status == "warning":
+            return self.downgrade(tier)
+
+        if status == "critical":
+            return "low"
+
+        if status == "blocked":
+            return "blocked"
+
+        return tier
 
 
     def select_model(self, tier: str):

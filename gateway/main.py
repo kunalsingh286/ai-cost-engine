@@ -11,13 +11,14 @@ from accounting.database import get_db
 from accounting.tokenizer import count_tokens
 from accounting.cost_engine import calculate_cost
 from accounting.logger import log_request
+from accounting.budget import BudgetManager
 
 from router.router import ModelRouter
 
 
 app = FastAPI(
     title="AI Cost Engine Gateway",
-    version="0.3.0"
+    version="0.4.0"
 )
 
 
@@ -38,6 +39,7 @@ class ChatResponse(BaseModel):
     response: str
     cost: float
     tokens: int
+    budget_status: str
 
 
 API_KEYS = {
@@ -67,7 +69,25 @@ def chat(
 
     try:
 
-        route_info = router_engine.route(request.prompt)
+        budget = BudgetManager(db)
+
+        user_budget = budget.check_user_budget(x_api_key)
+
+        org_budget = budget.check_org_budget()
+
+        status = min(
+            user_budget["status"],
+            org_budget["status"],
+            key=lambda x: ["ok", "warning", "critical", "blocked"].index(x)
+        )
+
+        route_info = router_engine.route(request.prompt, status)
+
+        if route_info["blocked"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Budget exceeded"
+            )
 
         model = route_info["model"]
         tier = route_info["tier"]
@@ -91,6 +111,9 @@ def chat(
             cost=cost
         )
 
+    except HTTPException:
+        raise
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -99,5 +122,6 @@ def chat(
         "tier": tier,
         "response": response,
         "cost": cost,
-        "tokens": total_tokens
+        "tokens": total_tokens,
+        "budget_status": status
     }

@@ -4,19 +4,31 @@ from router.policy import RoutingPolicy
 
 class ModelRouter:
 
+
     def __init__(self):
 
         self.classifier = RequestClassifier()
         self.policy = RoutingPolicy()
 
 
-    def route(self, prompt: str) -> dict:
+    def route(self, prompt: str, budget_status: str) -> dict:
 
-        tier = self.classifier.classify(prompt)
+        base_tier = self.classifier.classify(prompt)
 
-        model = self.policy.select_model(tier)
+        final_tier = self.policy.enforce_budget(
+            base_tier,
+            budget_status
+        )
+
+        if final_tier == "blocked":
+            return {
+                "blocked": True
+            }
+
+        model = self.policy.select_model(final_tier)
 
         return {
-            "tier": tier,
+            "blocked": False,
+            "tier": final_tier,
             "model": model
         }
