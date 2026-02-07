@@ -143,3 +143,29 @@ def forecast(
     result = service.generate(days)
 
     return result
+
+# ------------------ Metrics ------------------
+
+from prometheus_client import Counter, generate_latest
+
+
+REQUEST_COUNT = Counter(
+    "aicost_requests_total",
+    "Total API requests"
+)
+
+
+@app.middleware("http")
+async def metrics_middleware(request, call_next):
+
+    REQUEST_COUNT.inc()
+
+    response = await call_next(request)
+
+    return response
+
+
+@app.get("/metrics")
+def metrics():
+
+    return generate_latest()
