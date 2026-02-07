@@ -12,10 +12,12 @@ from accounting.tokenizer import count_tokens
 from accounting.cost_engine import calculate_cost
 from accounting.logger import log_request
 
+from router.router import ModelRouter
+
 
 app = FastAPI(
     title="AI Cost Engine Gateway",
-    version="0.2.0"
+    version="0.3.0"
 )
 
 
@@ -23,14 +25,16 @@ config = load_config()
 
 ollama = OllamaClient()
 
+router_engine = ModelRouter()
+
 
 class ChatRequest(BaseModel):
     prompt: str
-    model: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
     model: str
+    tier: str
     response: str
     cost: float
     tokens: int
@@ -61,12 +65,12 @@ def chat(
 
     verify_key(x_api_key)
 
-    model = request.model
-
-    if not model:
-        model = config["models"]["medium"][0]
-
     try:
+
+        route_info = router_engine.route(request.prompt)
+
+        model = route_info["model"]
+        tier = route_info["tier"]
 
         response = ollama.generate(model, request.prompt)
 
@@ -92,6 +96,7 @@ def chat(
 
     return {
         "model": model,
+        "tier": tier,
         "response": response,
         "cost": cost,
         "tokens": total_tokens
