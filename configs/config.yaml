@@ -24,7 +24,7 @@ budgets:
   org_monthly: 40
 
 database:
-  url: postgresql://user:password@localhost:5432/aicost
+  url: postgresql://aicost_user:aicost_pass@localhost:5432/aicost
 
 cache:
   redis_url: redis://localhost:6379
