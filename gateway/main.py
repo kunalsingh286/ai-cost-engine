@@ -1,8 +1,14 @@
-from fastapi import FastAPI, HTTPException, Header, Depends, Query
+from fastapi import FastAPI, HTTPException, Header, Depends, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 
 from sqlalchemy.orm import Session
+
+import redis.asyncio as redis
+from fastapi_limiter import FastAPILimiter
+from fastapi_limiter.depends import RateLimiter
+
+from prometheus_client import Counter, generate_latest
 
 from gateway.ollama_client import OllamaClient
 from gateway.config import load_config
@@ -16,11 +22,16 @@ from accounting.budget import BudgetManager
 from router.router import ModelRouter
 
 from forecasting.service import ForecastService
+from infra.cache import CacheClient
 
+
+# --------------------------------------------------
+# App
+# --------------------------------------------------
 
 app = FastAPI(
     title="AI Cost Engine Gateway",
-    version="0.5.0"
+    version="0.7.0"
 )
 
 
@@ -30,6 +41,10 @@ ollama = OllamaClient()
 
 router_engine = ModelRouter()
 
+
+# --------------------------------------------------
+# Models
+# --------------------------------------------------
 
 class ChatRequest(BaseModel):
     prompt: str
@@ -44,6 +59,10 @@ class ChatResponse(BaseModel):
     budget_status: str
 
 
+# --------------------------------------------------
+# Auth
+# --------------------------------------------------
+
 API_KEYS = {
     "dev-key-123"
 }
@@ -55,12 +74,67 @@ def verify_key(key: Optional[str]):
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
+# --------------------------------------------------
+# Startup
+# --------------------------------------------------
+
+@app.on_event("startup")
+async def startup():
+
+    redis_conn = redis.from_url(
+        "redis://localhost:6379",
+        encoding="utf-8",
+        decode_responses=True
+    )
+
+    await FastAPILimiter.init(redis_conn)
+
+
+# --------------------------------------------------
+# Metrics
+# --------------------------------------------------
+
+REQUEST_COUNT = Counter(
+    "aicost_requests_total",
+    "Total API requests"
+)
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+
+    REQUEST_COUNT.inc()
+
+    response = await call_next(request)
+
+    return response
+
+
+@app.get("/metrics")
+def metrics():
+
+    return generate_latest()
+
+
+# --------------------------------------------------
+# Health
+# --------------------------------------------------
+
 @app.get("/health")
 def health_check():
+
     return {"status": "ok"}
 
 
-@app.post("/v1/chat", response_model=ChatResponse)
+# --------------------------------------------------
+# Chat API
+# --------------------------------------------------
+
+@app.post(
+    "/v1/chat",
+    response_model=ChatResponse,
+    dependencies=[Depends(RateLimiter(times=10, seconds=60))]
+)
 def chat(
     request: ChatRequest,
     x_api_key: Optional[str] = Header(None),
@@ -69,8 +143,11 @@ def chat(
 
     verify_key(x_api_key)
 
+    cache = CacheClient()
+
     try:
 
+        # -------- Budget --------
         budget = BudgetManager(db)
 
         user_budget = budget.check_user_budget(x_api_key)
@@ -83,6 +160,7 @@ def chat(
             key=lambda x: ["ok", "warning", "critical", "blocked"].index(x)
         )
 
+        # -------- Routing --------
         route_info = router_engine.route(request.prompt, status)
 
         if route_info["blocked"]:
@@ -94,8 +172,26 @@ def chat(
         model = route_info["model"]
         tier = route_info["tier"]
 
+        # -------- Cache --------
+        cached = cache.get(model, request.prompt)
+
+        if cached:
+
+            return {
+                "model": model,
+                "tier": tier,
+                "response": cached,
+                "cost": 0.0,
+                "tokens": 0,
+                "budget_status": status
+            }
+
+        # -------- LLM Call --------
         response = ollama.generate(model, request.prompt)
 
+        cache.set(model, request.prompt, response)
+
+        # -------- Accounting --------
         prompt_tokens = count_tokens(request.prompt, model)
 
         completion_tokens = count_tokens(response, model)
@@ -129,6 +225,10 @@ def chat(
     }
 
 
+# --------------------------------------------------
+# Forecast API
+# --------------------------------------------------
+
 @app.get("/v1/forecast")
 def forecast(
     days: int = Query(7, ge=3, le=30),
@@ -140,32 +240,4 @@ def forecast(
 
     service = ForecastService(db)
 
-    result = service.generate(days)
-
-    return result
-
-# ------------------ Metrics ------------------
-
-from prometheus_client import Counter, generate_latest
-
-
-REQUEST_COUNT = Counter(
-    "aicost_requests_total",
-    "Total API requests"
-)
-
-
-@app.middleware("http")
-async def metrics_middleware(request, call_next):
-
-    REQUEST_COUNT.inc()
-
-    response = await call_next(request)
-
-    return response
-
-
-@app.get("/metrics")
-def metrics():
-
-    return generate_latest()
+    return service.generate(days)
