@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 
@@ -15,10 +15,12 @@ from accounting.budget import BudgetManager
 
 from router.router import ModelRouter
 
+from forecasting.service import ForecastService
+
 
 app = FastAPI(
     title="AI Cost Engine Gateway",
-    version="0.4.0"
+    version="0.5.0"
 )
 
 
@@ -125,3 +127,19 @@ def chat(
         "tokens": total_tokens,
         "budget_status": status
     }
+
+
+@app.get("/v1/forecast")
+def forecast(
+    days: int = Query(7, ge=3, le=30),
+    x_api_key: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+
+    verify_key(x_api_key)
+
+    service = ForecastService(db)
+
+    result = service.generate(days)
+
+    return result
