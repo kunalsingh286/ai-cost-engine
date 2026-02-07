@@ -1,0 +1,30 @@
+project:
+  name: ai-cost-engine
+  environment: development
+
+gateway:
+  host: 0.0.0.0
+  port: 8000
+
+models:
+  high:
+    - llama3
+  medium:
+    - qwen2.5
+  low:
+    - phi3
+
+pricing:
+  llama3: 0.15
+  qwen2.5: 0.10
+  phi3: 0.05
+
+budgets:
+  user_daily: 1.5
+  org_monthly: 40
+
+database:
+  url: postgresql://user:password@localhost:5432/aicost
+
+cache:
+  redis_url: redis://localhost:6379

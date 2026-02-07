@@ -1,0 +1,30 @@
+AI Cost & Capacity Optimization Engine - Architecture
+
+Client
+  |
+  v
+API Gateway (FastAPI)
+  |
+  v
+Routing Engine
+  |
+  +--> Budget Checker
+  |
+  +--> Cost Engine
+  |
+  v
+LLM Backend (Ollama / vLLM)
+  |
+  v
+Response
+
+All requests are logged into the Accounting System,
+which feeds the Forecasting Engine and Dashboard.
+
+Main Components:
+- Gateway
+- Router
+- Accounting
+- Forecasting
+- Dashboard
+- Infra
